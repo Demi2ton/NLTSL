@@ -1,0 +1,369 @@
+#include "imports/stdlib.fc";
+
+;;sc v0.4 groop stake lottery
+
+(slice, slice, int, int, int, cell) load_data() inline_ref {
+    slice ds = get_data().begin_parse();
+    return ( 
+    ds~load_msg_addr(),
+    ds~load_msg_addr(),
+    ds~load_uint(32),
+    ds~load_uint(32),
+    ds~load_uint(32),
+    ds.slice_bits() > 0 ? ds~load_dict() : new_dict()
+    ); 
+}
+() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+   
+slice cs = in_msg_full.begin_parse();
+     int flags = cs~load_uint(4);
+     if (flags & 1) { 
+        return ();
+}
+     slice sender_address = cs~load_msg_addr();
+
+if(in_msg_body.slice_empty?()) {
+
+   (slice owner_address, slice staddr,_,_,_,_) = load_data();
+
+  if (equal_slices(sender_address, staddr)){ ;; stake returned
+    return();
+  }
+ 
+ if (msg_value >= 10000000000) { ;;stake deposit
+    (slice owner_address, slice staddr, int total, int key, int bonus, cell dict) = load_data();
+    int entrys = msg_value / 10000000000 + bonus;
+    int entrysnb = msg_value / 10000000000;
+    total += entrysnb;
+    int n = key + 1;
+   builder string = begin_cell();
+   tuple chars = null();
+   do {
+    int r = n~divmod(10);
+    chars = cons(r + 48, chars);
+   } until (n == 0);
+   do {
+    int char = chars~list_next();
+    string~store_uint(char, 8);
+   } until (null?(chars));
+   slice bla = " - your withdraw code."; ;;";
+   slice result = string.end_cell().begin_parse();
+
+    cell msg = begin_cell()
+    .store_uint(0x18, 6) ;; flags
+    .store_slice(sender_address) ;; destination address
+    .store_coins(10000000) ;; amount of nanoTons to send
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; 107 zero-bits
+    .store_uint(0, 32) ;; zero opcode - means simple transfer message with comment
+    .store_slice(result) ;; comment
+    .store_slice(bla)
+    .end_cell();
+    send_raw_message(msg, 3); ;; mode 3 - pay fees separately, ignore errors
+
+    int cur_time = now();
+    slice slice_with_addr_time = begin_cell()
+    .store_slice(sender_address)
+    .store_uint(cur_time, 64)
+    .store_uint(entrys, 64)
+    .store_uint(entrysnb, 64)
+    .end_cell()
+    .begin_parse();
+    int a = 1;
+    while(a <= entrys) {
+		key += 1; 
+		dict~udict_set(256, key, slice_with_addr_time); ;; populates dict
+        a += 1;
+  }
+
+  set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(key, 32).store_uint(bonus, 32).store_dict(dict).end_cell());  
+ return ();
+ }
+ 
+ if (equal_slices(sender_address, owner_address)){
+return();
+}
+ 
+ throw(0xffffff);      
+}
+    
+int op = in_msg_body~load_uint(32);
+  if (op == 0) {
+  if (msg_value == 1000000000) {   ;;user withd
+   (slice owner_address, slice staddr, int total, int num, int bonus, cell dict) = load_data();
+   slice string_number = in_msg_body;
+
+   int number = 0;
+   while (~ string_number.slice_empty?()) {
+   int char = string_number~load_uint(8);
+    number = (number * 10) + (char - 48); 
+    } 
+
+   (slice val, int key) = dict.udict_get?(256, number);
+   slice addr = val~load_msg_addr();
+   int time = val~load_uint(64);
+   int entrys = val~load_uint(64);
+   int entrysnb = val~load_uint(64);
+   int avg = number + entrys;
+   if (key != 0){ 
+        if (equal_slices(sender_address, addr)){
+             while(number < avg) {
+        (slice val1, int key1) = dict.udict_get?(256, number);
+        slice addr1 = val1~load_msg_addr(); 
+        if (equal_slices(sender_address, addr1)){
+        dict~udict_delete?(256, number);
+        number += 1;
+        }
+   }
+   total -= entrysnb;
+   set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell());
+   int am = entrysnb * 10000000000;
+   cell msg = begin_cell()
+    .store_uint(0x18, 6) ;; flags
+    .store_slice(sender_address) ;; destination address
+    .store_coins(am) ;; amount of nanoTons to send
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; 107 zero-bits
+    .store_uint(0, 32) ;; zero opcode - means simple transfer message with comment
+    .store_slice("Withdraw") ;; comment
+    .end_cell();
+    send_raw_message(msg, 3); ;; mode 3 - pay fees separately, ignore errors
+    return();
+   }
+   throw(0xffffff);
+   }
+   throw(0xffffff);
+   ;;return();
+  }
+    
+    (_,slice staddr,_,_,_,_) = load_data();
+
+  if (equal_slices(sender_address, staddr)){ ;; stake returned
+    return();
+  }
+  throw(0xffffff);
+ }
+if (op == 3433) { ;; choose winer
+  (slice owner_address, slice staddr, int total, int num, int bonus, cell dict) = load_data();
+        throw_unless(411, equal_slices(sender_address, owner_address));
+        int cur_time = now();
+        int ok = 0;
+        do { 
+        randomize_lt();
+        int b = rand(num);
+        (slice val, int key) = dict.udict_get?(256, b);
+        if (key != 0){  
+        slice addr = val~load_msg_addr();
+        int time = val~load_uint(64);
+        if (time < cur_time - 1209600) { ;; - 2 weeks
+    [int myb,_] = get_balance();
+   int am = myb - total * 10000000000;
+   int amw = am / 100 * 88; ;;jackpot
+   int amc = am / 100 * 10; ;;comission
+        cell msg = begin_cell() 
+    .store_uint(0x18, 6) 
+    .store_slice(addr) 
+    .store_coins(amw) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("NLTSL Winer") 
+  .end_cell();
+  send_raw_message(msg, 3);
+  cell msg = begin_cell() 
+    .store_uint(0x18, 6) 
+    .store_slice(owner_address) 
+    .store_coins(amc) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("NLTSL") 
+  .end_cell();
+  send_raw_message(msg, 3); 
+   ok += 1;
+        }
+        }
+        }
+        until ((key != 0) & (ok == 1)); 
+        return();
+}
+
+ if (op == 3434){ ;; tw deposit
+    (slice owner_address,_, int total, int num, int bonus, cell dict) = load_data();
+    throw_unless(411, equal_slices(sender_address, owner_address));
+    slice ad = in_msg_body~load_msg_addr();
+   [int myb,_] = get_balance();
+   int bal = myb - 1000000000;
+   cell msg = begin_cell()
+    .store_uint(0x18, 6) 
+    .store_slice(ad) 
+    .store_coins(bal) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("Deposit") ;;"Deposit"
+    .end_cell();
+    send_raw_message(msg, 3); 
+
+    set_data(begin_cell().store_slice(owner_address).store_slice(ad).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell());
+
+  return ();
+ } 
+
+
+ if (op == 3435) { ;; tw withd
+     (slice owner_address,_,_,_,_,_) = load_data();
+    throw_unless(411, equal_slices(sender_address, owner_address));
+    slice ad = in_msg_body~load_msg_addr();
+    cell msg = begin_cell()
+    .store_uint(0x18, 6) ;; flags
+    .store_slice(ad) 
+    .store_coins(200000000) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; 107 zero-bits
+    .store_uint(0, 32) 
+    .store_slice("Withdraw") ;; comment
+    .end_cell();
+    send_raw_message(msg, 3); 
+  return ();
+ }
+  if (op == 3534){ ;; nomi deposit
+    (slice owner_address,_, int total, int num, int bonus, cell dict) = load_data();
+    throw_unless(411, equal_slices(sender_address, owner_address));
+    slice ad = in_msg_body~load_msg_addr();
+   [int myb,_] = get_balance();
+   int bal = myb - 1000000000;
+   cell msg = begin_cell()
+    .store_uint(0x18, 6) 
+    .store_slice(ad) 
+    .store_coins(bal) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("d") 
+    .end_cell();
+    send_raw_message(msg, 3); 
+
+    set_data(begin_cell().store_slice(owner_address).store_slice(ad).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell());
+
+  return ();
+ } 
+
+ if (op == 3535) { ;; nomi withd
+     (slice owner_address,_,_,_,_,_) = load_data();
+    throw_unless(411, equal_slices(sender_address, owner_address));
+    slice ad = in_msg_body~load_msg_addr();
+    cell msg = begin_cell()
+    .store_uint(0x18, 6) ;; flags
+    .store_slice(ad) 
+    .store_coins(1000000000) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; 107 zero-bits
+    .store_uint(0, 32) 
+    .store_slice("w") ;; comment
+    .end_cell();
+    send_raw_message(msg, 3); 
+  return ();
+ }
+
+  if (op == 3436) { ;; change
+        (slice owner_address,_,_,_,_,_) = load_data();
+      throw_unless(411, equal_slices(sender_address, owner_address));
+
+        cell new_code = in_msg_body~load_ref();
+        set_code(new_code);
+
+        cont old_code = get_c3();
+        set_c3(new_code.begin_parse().bless());
+
+        throw(0);
+ }
+
+
+ if (op == 3437){ ;;1: withdraw investments, - total. 2: withdraw withdraw comission.
+     (slice owner_address, slice staddr, int total, int num, int bonus, cell dict) = load_data(); 
+     throw_unless(411, equal_slices(sender_address, owner_address));
+     int am = in_msg_body~load_uint(32);
+     int opv = in_msg_body~load_uint(32);
+     if (opv == 1){
+     int sam = am * 10000000000;
+    cell msg = begin_cell()
+    .store_uint(0x18, 6) 
+    .store_slice(owner_address) 
+    .store_coins(sam) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("Withdraw NLTS") 
+    .end_cell();
+    send_raw_message(msg, 3); 
+    total -= am;
+    set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell()); 
+    return ();
+     }
+     if (opv == 2){ ;; gbb
+     int bam = am * 1000000000;
+     cell msg = begin_cell()
+    .store_uint(0x18, 6) 
+    .store_slice(owner_address) 
+    .store_coins(bam) 
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) 
+    .store_uint(0, 32) 
+    .store_slice("Withdraw NLTS") 
+    .end_cell();
+    send_raw_message(msg, 3);
+    return (); 
+     } 
+    return ();
+ }
+
+ if (op == 3438){ ;;fund
+   (slice owner_address, slice staddr, int total, int num, int bonus, cell dict) = load_data();
+   int entrys = msg_value / 10000000000;
+   total += entrys;
+   set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell()); 
+
+     return();
+ }
+ if (op == 3439){ ;;bonus
+  (slice owner_address, slice staddr, int total, int num, int bonus, cell dict) = load_data();
+  throw_unless(411, equal_slices(sender_address, owner_address));
+  int bonus = in_msg_body~load_uint(32);
+  set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(num, 32).store_uint(bonus, 32).store_dict(dict).end_cell()); 
+return();
+ }
+ if (op == 34440){
+  (slice owner_address, slice staddr, int total, int key, int bonus, cell dict) = load_data();
+  throw_unless(411, equal_slices(sender_address, owner_address));
+  slice ad = in_msg_body~load_msg_addr();
+  int cur_time = now();
+    slice slice_with_addr_time = begin_cell()
+    .store_slice(ad)
+    .store_uint(cur_time, 64)
+    .store_uint(1, 64)
+    .store_uint(1, 64)
+    .end_cell()
+    .begin_parse();
+		key += 1; 
+		dict~udict_set(256, key, slice_with_addr_time); ;; populates dict
+    set_data(begin_cell().store_slice(owner_address).store_slice(staddr).store_uint(total, 32).store_uint(key, 32).store_uint(bonus, 32).store_dict(dict).end_cell());  
+  cell msg = begin_cell()
+    .store_uint(0x18, 6) ;; flags
+    .store_slice(ad) ;; destination address
+    .store_coins(10000000) ;; amount of nanoTons to send
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; 107 zero-bits
+    .store_uint(0, 32) ;; zero opcode - means simple transfer message with comment
+    .store_slice("Your Free Entry has been added!") ;; comment
+    .end_cell();
+    send_raw_message(msg, 3); ;; mode 3 - pay fees separately, ignore errors
+  
+  return ();
+ }
+
+ throw(0xffffff);
+}
+
+    int get_id() method_id { ;; get total entrys, without bonus
+        (_,_, int total,_,_,_) = load_data();
+     return total;
+    }
+    int get_keys() method_id { ;; get total keys
+        (_,_,_, int keys,_,_) = load_data();
+     return keys;
+    }
+
+    cell get_dict() method_id { ;; get entrys
+        (_,_,_,_,_,cell dict) = load_data();
+     return dict;
+    }
